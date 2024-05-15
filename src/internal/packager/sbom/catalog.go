@@ -5,6 +5,7 @@
 package sbom
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
 	"os"
@@ -30,6 +31,8 @@ import (
 	"github.com/defenseunicorns/zarf/src/pkg/transform"
 	"github.com/defenseunicorns/zarf/src/pkg/utils"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
+	protobomReader "github.com/protobom/protobom/pkg/reader"
+	protobomSBOM "github.com/protobom/protobom/pkg/sbom"
 )
 
 // Builder is the main struct used to build SBOM artifacts.
@@ -72,6 +75,9 @@ func Catalog(componentSBOMs map[string]*layout.ComponentSBOM, imageList []transf
 
 	// Generate SBOM for each image
 	currImage := 1
+	rootSBOM := protobomSBOM.NewDocument()
+	rootNode := protobomSBOM.NewNode()
+	rootSBOM.NodeList.AddRootNode(rootNode)
 	for _, refInfo := range imageList {
 		builder.spinner.Updatef("Creating image SBOMs (%d of %d): %s", currImage, imageCount, refInfo.Reference)
 
@@ -87,6 +93,15 @@ func Catalog(componentSBOMs map[string]*layout.ComponentSBOM, imageList []transf
 			builder.spinner.Errorf(err, "Unable to create SBOM for image %s", refInfo.Reference)
 			return err
 		}
+
+		reader := protobomReader.New()
+		doc, err := reader.ParseStream(bytes.NewReader(jsonData))
+		if err != nil {
+			builder.spinner.Errorf(err, "Unable to parse SBOM for image %s", refInfo.Reference)
+			return err
+		}
+
+		rootSBOM.NodeList.RelateNodeListAtID(doc.NodeList, rootNode.Id, protobomSBOM.Edge_contains)
 
 		if err = builder.createSBOMViewerAsset(refInfo.Reference, jsonData); err != nil {
 			builder.spinner.Errorf(err, "Unable to create SBOM viewer for image %s", refInfo.Reference)
